@@ -770,9 +770,7 @@ void lcdprint_uint32(uint32_t v) {
 
 void initLCD() {
   blinkLED(20,30,1);
-  #if defined(BUZZER)
-    alarmArray[7] = 1;
-  #endif
+  SET_ALARM_BUZZER(ALRM_FAC_CONFIRM, ALRM_LVL_CONFIRM_1);
   #if defined(LCD_SERIAL3W)
     SerialEnd(0);
     //init LCD
@@ -1083,7 +1081,11 @@ const char PROGMEM lcd_param_text135 [] = "GovernRpm";
 const char PROGMEM lcd_param_text150 [] = "writeCset";
 #endif
 const char PROGMEM lcd_param_text151 [] = "Reset (7)";
-//                                         0123456789
+#ifdef YAW_COLL_PRECOMP
+const char PROGMEM lcd_param_text155 [] = "yawPrcomp";
+const char PROGMEM lcd_param_text156 [] = "yawPrDead";
+#endif
+//                                         012345678
 
 PROGMEM const void * const lcd_param_ptr_table [] = {
   &lcd_param_text01, &conf.pid[ROLL].P8, &__P,
@@ -1095,7 +1097,9 @@ PROGMEM const void * const lcd_param_ptr_table [] = {
   &lcd_param_text07, &conf.pid[PITCH].D8, &__D,
   &lcd_param_text08, &conf.pid[YAW].P8, &__P,
   &lcd_param_text09, &conf.pid[YAW].I8, &__I,
+#if (!(PID_CONTROLLER == 1)) || (!defined(COPTER_WITH_SERVO))
   &lcd_param_text10, &conf.pid[YAW].D8, &__D,
+#endif
 #if BARO && (!defined(SUPPRESS_BARO_ALTHOLD))
   &lcd_param_text11, &conf.pid[PIDALT].P8, &__P,
   &lcd_param_text12, &conf.pid[PIDALT].I8, &__I,
@@ -1334,6 +1338,10 @@ PROGMEM const void * const lcd_param_ptr_table [] = {
   &lcd_param_text133, &conf.governorP, &__D,
   &lcd_param_text134, &conf.governorD, &__D,
 #endif
+#ifdef YAW_COLL_PRECOMP
+  &lcd_param_text155, &conf.yawCollPrecomp, &__PT,
+  &lcd_param_text156, &conf.yawCollPrecompDeadband, &__SE,
+#endif
 #ifdef GYRO_SMOOTHING
   &lcd_param_text80, &conf.Smoothing[0], &__D,
   &lcd_param_text81, &conf.Smoothing[1], &__D,
@@ -1466,9 +1474,7 @@ static uint8_t lcdStickState[4];
 #ifdef DISPLAY_2LINES
 void ConfigRefresh(uint8_t p) {
   blinkLED(10,20,1);
-  #if defined(BUZZER)
-    alarmArray[0] = 1;
-  #endif
+  SET_ALARM_BUZZER(ALRM_FAC_TOGGLE, ALRM_LVL_TOGGLE_1);
   strcpy_P(line1,PSTR("                "));
   strcpy(line2,line1);
   strcpy_P(line1, (char*)pgm_read_word(&(lcd_param_ptr_table[p * 3])));
@@ -1487,9 +1493,7 @@ void ConfigRefresh(uint8_t p) {
   int8_t pp = (int8_t)p;
   #ifndef OLED_I2C_128x64
    blinkLED(2,4,1);
-   #if defined(BUZZER)
-     alarmArray[0] = 1;
-   #endif
+   SET_ALARM_BUZZER(ALRM_FAC_TOGGLE, ALRM_LVL_TOGGLE_1);
    LCDclear();
   #else
    delay(60);
@@ -1547,6 +1551,7 @@ void configurationLoop() {
       refreshLCD = 0;
     }
     #if defined(SERIAL_RX)
+      delay(10); // may help with timing for some serial receivers -1/100 second seems non-critical here?
       if (spekFrameFlags == 0x01) readSerial_RX();
       delay(44); // For digital receivers , to ensure that an "old" frame does not cause immediate exit at startup. 
     #endif
@@ -1593,13 +1598,14 @@ void configurationLoop() {
     #endif
   } // while (LCD == 1)
   blinkLED(20,30,1);
-  #if defined(BUZZER)
-    alarmArray[7] = 1;
-  #endif
+  SET_ALARM_BUZZER(ALRM_FAC_CONFIRM, ALRM_LVL_CONFIRM_1);
   LCDclear();
   LCDsetLine(1);
-  if (LCD == 0) {
+  if (LCD == 0) { //     0123456789
     strcpy_P(line1,PSTR("Saving..."));
+    #ifdef MULTIPLE_CONFIGURATION_PROFILES
+      line1[7] = digit1(global_conf.currentSet);
+    #endif
     LCDprintChar(line1);
     #ifdef MULTIPLE_CONFIGURATION_PROFILES
       writeGlobalSet(0);
@@ -1826,7 +1832,9 @@ void output_altitude() {
 }
 void output_uptime_cset() {
   strcpy_P(line1,PSTR("Up ")); LCDprintChar(line1); print_uptime(millis() / 1000 );
-  strcpy_P(line1,PSTR("  Cset -")); line1[7] = digit1(global_conf.currentSet); LCDprintChar(line1);
+  #ifdef MULTIPLE_CONFIGURATION_PROFILES
+    strcpy_P(line1,PSTR("  Cset -")); line1[7] = digit1(global_conf.currentSet); LCDprintChar(line1);
+  #endif
 }
 void output_cycle() {
   strcpy_P(line1,PSTR("Cycle    -----us")); //uin16_t cycleTime
@@ -1973,7 +1981,7 @@ void print_uptime(uint16_t sec) {
 #if GPS
 void fill_line1_gps_lat(uint8_t sat) {
   int32_t aGPS_latitude = abs(GPS_coord[LAT]);
-  strcpy_P(line1,PSTR(".---.------- #  "));
+  strcpy_P(line1,PSTR(".---.------- #--"));
   //                   0123456789012345
   line1[0] = GPS_coord[LAT]<0?'S':'N';
   if (sat) {
@@ -1999,7 +2007,7 @@ void fill_line2_gps_lon(uint8_t status) {
   line2[0] = GPS_coord[LON]<0?'W':'E';
   if (status) {
     line2[13] = (GPS_update ? 'U' : '.');
-    line2[15] = (1 ? 'P' : '.');
+    //line2[15] = (1 ? 'P' : '.');
   }
   line2[1]  = '0' + aGPS_longitude / 1000000000;
   line2[2]  = '0' + aGPS_longitude / 100000000 - (aGPS_longitude/1000000000) * 10;
@@ -2048,7 +2056,7 @@ void output_debug3() { LCDprintChar("D4 "); LCDprintInt16(debug[3]); }
 #if defined(DEBUG) || defined(DEBUG_FREE)
   #define PRINT_FREE_RAM  { \
     extern unsigned int __bss_end; \
-    extern unsigned int __heap_start; \
+    /*extern unsigned int __heap_start;*/ \
     extern void *__brkval; \
     int free_memory; \
     if((int)__brkval == 0) \
@@ -2435,6 +2443,41 @@ void lcd_telemetry() {
     }
 #endif // page 5
 
+#ifndef SUPPRESS_TELEMETRY_PAGE_6
+  #if defined(VBAT_CELLS)
+    #ifdef DISPLAY_FONT_DSIZE
+    case '^':
+      { offset = 4; }
+      // no break !!
+    #endif
+    case 6: // alarms states
+    case '6':
+      {
+        i = linenr++ % VBAT_CELLS_NUM; // VBAT_CELLS_NUM cells
+        LCDsetLine((i - POSSIBLE_OFFSET)% VBAT_CELLS_NUM + 1);
+        strcpy_P(line1,PSTR("_:-.-V __._V"));
+        //                   0123456789.12345
+        line1[0] = digit1(i+1);
+        uint16_t v = analog.vbatcells[i];
+        if (i>0) v = (analog.vbatcells[i] > analog.vbatcells[i-1] ? analog.vbatcells[i] - analog.vbatcells[i-1] : 0);
+        line1[2] = digit10(v);
+        line1[4] =  digit1(v);
+        line1[7] = digit100(analog.vbatcells[i]);
+        line1[8] =  digit10(analog.vbatcells[i]);
+        line1[10] =   digit1(analog.vbatcells[i]);
+        //      #ifndef OLED_I2C_128x64
+        //        if (analog.vbat < conf.vbatlevel_warn1) { LCDattributesReverse(); }
+        //      #endif
+        if (v > VBATNOMINAL/VBAT_CELLS_NUM) v = VBATNOMINAL/VBAT_CELLS_NUM;
+        LCDbar(DISPLAY_COLUMNS-12, (v*100*VBAT_CELLS_NUM)/VBATNOMINAL );
+        //      LCDattributesOff(); // turn Reverse off for rest of display
+        LCDprintChar(line1);
+        LCDcrlf();
+        break;
+      }
+  #endif // vbat.cells
+#endif // page 6
+
 #ifndef SUPPRESS_TELEMETRY_PAGE_7
   #if GPS
     #ifdef DISPLAY_FONT_DSIZE
@@ -2463,18 +2506,18 @@ void lcd_telemetry() {
           line1[1] = digit1(GPS_numSat);
           LCDprintChar(line1);
           break;
-        case 3: //
-          strcpy_P(line1,PSTR("Status "));
-          //                   0123456789012345
-          LCDprintChar(line1);
-          if (1)
-            LCDprintChar("OK");
-          else {
-            LCDattributesReverse();
-            LCDprintChar("KO");
-            LCDattributesOff();
-          }
-        break;
+//        case 3: //
+//          strcpy_P(line1,PSTR("Status "));
+//          //                   0123456789012345
+//          LCDprintChar(line1);
+//          if (1)
+//            LCDprintChar("OK");
+//          else {
+//            LCDattributesReverse();
+//            LCDprintChar("KO");
+//            LCDattributesOff();
+//          }
+//        break;
         case 4: // gps speed
         {
           uint8_t v = (GPS_speed * 0.036f);
@@ -2496,6 +2539,37 @@ void lcd_telemetry() {
     break;
   #endif // gps
 #endif // page 7
+
+#ifndef SUPPRESS_TELEMETRY_PAGE_8
+  #ifdef DISPLAY_FONT_DSIZE
+      case '*':
+      { offset = 5; }
+      // no break !!
+  #endif
+    case 8: // alarms states
+    case '8':
+    //   123456789.1234567890
+    static char alarmsNames[][12] = {
+        "0: toggle  ",
+        "1: failsafe",
+        "2: noGPS   ",
+        "3: beeperOn",
+        "4: pMeter  ",
+        "5: runtime ",
+        "6: vBat    ",
+        "7: confirma",
+        "8: Acc     ",
+        "9: I2Cerror" };
+    linenr++;
+    linenr %= min(MULTILINE_PRE+MULTILINE_POST, 10 - POSSIBLE_OFFSET);
+    LCDsetLine(linenr+1);
+    // [linenr + POSSIBLE_OFFSET]
+    LCDprintChar( alarmsNames[linenr + POSSIBLE_OFFSET] );
+    LCDprint(' ');
+    LCDprint( digit1( alarmArray[linenr + POSSIBLE_OFFSET] ) );
+    LCDcrlf();
+    break;
+#endif // page 8
 
 #ifndef SUPPRESS_TELEMETRY_PAGE_9
   #ifdef DISPLAY_FONT_DSIZE
@@ -2626,7 +2700,7 @@ void toggle_telemetry(uint8_t t) {
         blinkLED(5,200,5);
         delay(5000);
       }
-      alarmArray[7] = 3;
+      SET_ALARM(ALRM_FAC_CONFIRM, ALRM_LVL_CONFIRM_ELSE);
     }
   }
   #endif // LOG_PERMANENT_SERVICE_LIFETIME

@@ -195,7 +195,9 @@ flags_struct_t f;
   uint16_t cycleTimeMin = 65535;   // lowest ever cycle timen
   int32_t  BAROaltMax;             // maximum value
   uint16_t GPS_speedMax = 0;       // maximum speed from gps
-  uint16_t powerValueMaxMAH = 0;
+  #ifdef POWERMETER_HARD
+    uint16_t powerValueMaxMAH = 0;
+  #endif
   #if defined(WATTS)
     uint16_t wattsMax = 0;
   #endif
@@ -205,7 +207,6 @@ flags_struct_t f;
 #endif
 
 int16_t  i2c_errors_count = 0;
-
 
 
 #if defined(THROTTLE_ANGLE_CORRECTION)
@@ -358,7 +359,7 @@ conf_t conf;
   int8_t alt_change_flag;
   uint32_t alt_change;
 
-uint8_t alarmArray[16];           // array
+uint8_t alarmArray[ALRM_FAC_SIZE];           // array
 
 #if BARO
   int32_t baroPressure;
@@ -371,11 +372,16 @@ void annexCode() { // this code is excetuted at each loop and won't interfere wi
   uint16_t tmp,tmp2;
   uint8_t axis,prop1,prop2;
 
-  // PITCH & ROLL only dynamic PID adjustemnt,  depending on throttle value
+  // PITCH & ROLL only dynamic PID adjustemnt,  depending on throttle value (or collective.pitch value for heli)
+  #ifdef HELICOPTER
+    #define DYN_THR_PID_CHANNEL COLLECTIVE_PITCH
+  #else
+    #define DYN_THR_PID_CHANNEL THROTTLE
+  #endif
   prop2 = 128; // prop2 was 100, is 128 now
-  if (rcData[THROTTLE]>1500) { // breakpoint is fix: 1500
-    if (rcData[THROTTLE]<2000) {
-      prop2 -=  ((uint16_t)conf.dynThrPID*(rcData[THROTTLE]-1500)>>9); //  /512 instead of /500
+  if (rcData[DYN_THR_PID_CHANNEL]>1500) { // breakpoint is fix: 1500
+    if (rcData[DYN_THR_PID_CHANNEL]<2000) {
+      prop2 -=  ((uint16_t)conf.dynThrPID*(rcData[DYN_THR_PID_CHANNEL]-1500)>>9); //  /512 instead of /500
     } else {
       prop2 -=  conf.dynThrPID;
     }
@@ -416,65 +422,69 @@ void annexCode() { // this code is excetuted at each loop and won't interfere wi
 
   // query at most one multiplexed analog channel per MWii cycle
   static uint8_t analogReader =0;
-  switch (analogReader++%3) {
-  #if defined(POWERMETER_HARD)
+  switch (analogReader++ % (3+VBAT_CELLS_NUM)) {
   case 0:
   {
-    uint16_t pMeterRaw; // used for current reading
-    static uint32_t lastRead = currentTime;
-    static uint8_t ind = 0;
-    static uint16_t pvec[PSENSOR_SMOOTH], psum;
-    uint16_t p =  analogRead(PSENSORPIN);
-    #if PSENSOR_SMOOTH != 1
-      psum += p;
-      psum -= pvec[ind];
-      pvec[ind++] = p;
-      ind %= PSENSOR_SMOOTH;
-      p = psum / PSENSOR_SMOOTH;
-    #endif
-    powerValue = ( conf.psensornull > p ? conf.psensornull - p : p - conf.psensornull); // do not use abs(), it would induce implicit cast to uint and overrun
-    analog.amperage = ((uint32_t)powerValue * conf.pint2ma) / 100; // [100mA]    //old (will overflow for 65A: powerValue * conf.pint2ma; // [1mA]
-    pMeter[PMOTOR_SUM] += ((currentTime-lastRead) * (uint32_t)((uint32_t)powerValue*conf.pint2ma))/100000; // [10 mA * msec]
-    lastRead = currentTime;
+    #if defined(POWERMETER_HARD)
+      static uint32_t lastRead = currentTime;
+      static uint8_t ind = 0;
+      static uint16_t pvec[PSENSOR_SMOOTH], psum;
+      uint16_t p =  analogRead(PSENSORPIN);
+      //LCDprintInt16(p); LCDcrlf();
+      //debug[0] = p;
+      #if PSENSOR_SMOOTH != 1
+        psum += p;
+        psum -= pvec[ind];
+        pvec[ind++] = p;
+        ind %= PSENSOR_SMOOTH;
+        p = psum / PSENSOR_SMOOTH;
+      #endif
+      powerValue = ( conf.psensornull > p ? conf.psensornull - p : p - conf.psensornull); // do not use abs(), it would induce implicit cast to uint and overrun
+      analog.amperage = ((uint32_t)powerValue * conf.pint2ma) / 100; // [100mA]    //old (will overflow for 65A: powerValue * conf.pint2ma; // [1mA]
+      pMeter[PMOTOR_SUM] += ((currentTime-lastRead) * (uint32_t)((uint32_t)powerValue*conf.pint2ma))/100000; // [10 mA * msec]
+      lastRead = currentTime;
+    #endif // POWERMETER_HARD
     break;
   }
-  #endif // POWERMETER_HARD
 
-  #if defined(VBAT)
   case 1:
   {
+    #if defined(VBAT) && !defined(VBAT_CELLS)
       static uint8_t ind = 0;
       static uint16_t vvec[VBAT_SMOOTH], vsum;
       uint16_t v = analogRead(V_BATPIN);
       #if VBAT_SMOOTH == 1
-        analog.vbat = (v<<4) / conf.vbatscale; // result is Vbatt in 0.1V steps
+        analog.vbat = (v<<4) / conf.vbatscale + VBAT_OFFSET; // result is Vbatt in 0.1V steps
       #else
         vsum += v;
         vsum -= vvec[ind];
         vvec[ind++] = v;
         ind %= VBAT_SMOOTH;
         #if VBAT_SMOOTH == 16
-          analog.vbat = vsum / conf.vbatscale; // result is Vbatt in 0.1V steps
+          analog.vbat = vsum / conf.vbatscale + VBAT_OFFSET; // result is Vbatt in 0.1V steps
         #elif VBAT_SMOOTH < 16
-          analog.vbat = (vsum * (16/VBAT_SMOOTH)) / conf.vbatscale; // result is Vbatt in 0.1V steps
+          analog.vbat = (vsum * (16/VBAT_SMOOTH)) / conf.vbatscale + VBAT_OFFSET; // result is Vbatt in 0.1V steps
         #else
-          analog.vbat = ((vsum /VBAT_SMOOTH) * 16) / conf.vbatscale; // result is Vbatt in 0.1V steps
+          analog.vbat = ((vsum /VBAT_SMOOTH) * 16) / conf.vbatscale + VBAT_OFFSET; // result is Vbatt in 0.1V steps
         #endif
       #endif
-      break;
+    #endif // VBAT
+    break;
   }
-  #endif // VBAT
-  #if defined(RX_RSSI)
   case 2:
   {
+  #if defined(RX_RSSI)
     static uint8_t ind = 0;
     static uint16_t rvec[RSSI_SMOOTH], rsum, r;
-    #if defined(RX_RSSI_CHAN) 
+
+    // http://www.multiwii.com/forum/viewtopic.php?f=8&t=5530
+    #if defined(RX_RSSI_CHAN)
       uint16_t rssi_Input = constrain(rcData[RX_RSSI_CHAN],1000,2000);
       r = map((uint16_t)rssi_Input , 1000, 2000, 0, 1023);
     #else
       r = analogRead(RX_RSSI_PIN);
     #endif 
+
     #if RSSI_SMOOTH == 1
       analog.rssi = r;
     #else
@@ -485,11 +495,26 @@ void annexCode() { // this code is excetuted at each loop and won't interfere wi
       r = rsum / RSSI_SMOOTH;
       analog.rssi = r;
     #endif
-    break;
+   #endif // RX RSSI
+   break;
   }
-  #endif
+  default: // here analogReader >=4, because of ++ in switch()
+  {
+    #if defined(VBAT) && defined(VBAT_CELLS)
+      if ( (analogReader<4) || (analogReader>4+VBAT_CELLS_NUM-1) ) break;
+      uint8_t ind = analogReader-4;
+      static uint16_t vbatcells_pins[VBAT_CELLS_NUM] = VBAT_CELLS_PINS;
+      static uint8_t  vbatcells_offset[VBAT_CELLS_NUM] = VBAT_CELLS_OFFSETS;
+      static uint8_t  vbatcells_div[VBAT_CELLS_NUM] = VBAT_CELLS_DIVS;
+      uint16_t v = analogRead(vbatcells_pins[ind]);
+      analog.vbatcells[ind] = vbatcells_offset[ind] + (v << 2) / vbatcells_div[ind]; // result is Vbatt in 0.1V steps
+      if (ind == VBAT_CELLS_NUM -1) analog.vbat = analog.vbatcells[ind];
+    #endif // VBAT) && defined(VBAT_CELLS)
+    break;
+  } // end default
   } // end of switch()
-#ifdef POWERMETER_HARD
+
+#if defined( POWERMETER_HARD ) && (defined(LOG_VALUES) || defined(LCD_TELEMETRY))
   if (analog.amperage > powerValueMaxMAH) powerValueMaxMAH = analog.amperage;
 #endif
 
@@ -747,6 +772,11 @@ void go_arm() {
       #if defined(VBAT)
         if (analog.vbat > NO_VBAT) vbatMin = analog.vbat;
       #endif
+      #ifdef ALTITUDE_RESET_ON_ARM
+        #if BARO
+          calibratingB = 10; // calibrate baro to new ground level (10 * 25 ms = ~250 ms non blocking)
+        #endif
+      #endif
       #ifdef LCD_TELEMETRY // reset some values when arming
         #if BARO
           BAROaltMax = alt.EstAlt;
@@ -754,7 +784,7 @@ void go_arm() {
         #if GPS
           GPS_speedMax = 0;
         #endif
-        #ifdef POWERMETER_HARD
+        #if defined( POWERMETER_HARD ) && (defined(LOG_VALUES) || defined(LCD_TELEMETRY))
           powerValueMaxMAH = 0;
         #endif
         #ifdef WATTS
@@ -770,7 +800,7 @@ void go_arm() {
     }
   } else if(!f.ARMED) { 
     blinkLED(2,255,1);
-    alarmArray[8] = 1;
+    SET_ALARM(ALRM_FAC_ACC, ALRM_LVL_ON);
   }
 }
 void go_disarm() {
@@ -903,7 +933,8 @@ void loop () {
             }else{ 
               AccInflightCalibrationArmed = !AccInflightCalibrationArmed; 
               #if defined(BUZZER)
-               if (AccInflightCalibrationArmed) alarmArray[0]=2; else   alarmArray[0]=3;
+                if (AccInflightCalibrationArmed) SET_ALARM_BUZZER(ALRM_FAC_TOGGLE, ALRM_LVL_TOGGLE_2);
+                else     SET_ALARM_BUZZER(ALRM_FAC_TOGGLE, ALRM_LVL_TOGGLE_ELSE);
               #endif
             }
          } 
@@ -917,7 +948,7 @@ void loop () {
             writeGlobalSet(0);
             readEEPROM();
             blinkLED(2,40,i);
-            alarmArray[0] = i;
+            SET_ALARM(ALRM_FAC_TOGGLE, i);
           }
         #endif
         if (rcSticks == THR_LO + YAW_HI + PIT_HI + ROL_CE) {            // Enter LCD config
@@ -1233,11 +1264,18 @@ void loop () {
     }
   }
  
-  computeIMU();
-  // Measure loop rate just afer reading the sensors
-  currentTime = micros();
-  cycleTime = currentTime - previousTime;
+  while(1) {
+    currentTime = micros();
+    cycleTime = currentTime - previousTime;
+    #if defined(LOOP_TIME)
+      if (cycleTime >= LOOP_TIME) break;
+    #else
+      break;  
+    #endif
+  }
   previousTime = currentTime;
+
+  computeIMU();
 
   //***********************************
   //**** Experimental FlightModes *****

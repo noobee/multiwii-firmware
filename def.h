@@ -63,6 +63,8 @@
   #define LOG_PERMANENT_SERVICE_LIFETIME 36000
   #define GOVERNOR_P 0
   #define GOVERNOR_D 10
+  #define YAW_COLL_PRECOMP 15
+  #define YAW_COLL_PRECOMP_DEADBAND 130
   #define VOLTAGEDROP_COMPENSATION
 #elif COPTERTEST == 6
   #define HEX6H
@@ -82,6 +84,8 @@
   #define LCD_CONF
 #elif COPTERTEST == 7
   #define HELI_120_CCPM
+  #define YAW_COLL_PRECOMP 15
+  #define YAW_COLL_PRECOMP_DEADBAND 130
   #define NANOWII
   #define FORCE_ACC_ORIENTATION(X, Y, Z)  {imu.accADC[ROLL]  = X; imu.accADC[PITCH]  =  Y; imu.accADC[YAW]  =  Z;}
   #define FORCE_GYRO_ORIENTATION(X, Y, Z) {imu.gyroADC[ROLL] = -Y; imu.gyroADC[PITCH] = X; imu.gyroADC[YAW] = -Z;}
@@ -110,6 +114,17 @@
   #define ITG3200
   #define PID_CONTROLLER 2
   #define ESC_CALIB_CANNOT_FLY
+#elif COPTERTEST == 9
+  #define AIRPLANE
+  #define FREEIMUv035
+  #define POWERMETER_HARD
+  #define WATTS
+  #define VBAT
+  #define VBAT_CELLS
+  #define VBAT_CELLS_NUM 3
+  #define VBAT_CELLS_PINS {A0, A1, A2 }
+  #define VBAT_CELLS_OFFSETS {0, 50, 83 }
+  #define VBAT_CELLS_DIVS { 75, 122,  98 }
 #elif defined(COPTERTEST)
   #error "*** this test is not yet defined"
 #endif
@@ -933,6 +948,12 @@
   #define GYRO_ORIENTATION(X, Y, Z) {imu.gyroADC[ROLL] = -X; imu.gyroADC[PITCH] = -Y; imu.gyroADC[YAW] = -Z;}
   #undef INTERNAL_I2C_PULLUPS
   // move motor 7 & 8 to pin 4 & A2
+  #undef SOFT_PWM_3_PIN_HIGH
+  #undef SOFT_PWM_3_PIN_LOW
+  #undef SOFT_PWM_4_PIN_HIGH
+  #undef SOFT_PWM_4_PIN_LOW
+  #undef SW_PWM_P3
+  #undef SW_PWM_P4
   #define SOFT_PWM_3_PIN_HIGH        PORTD |= 1<<4;
   #define SOFT_PWM_3_PIN_LOW         PORTD &= ~(1<<4);
   #define SOFT_PWM_4_PIN_HIGH        PORTF |= 1<<5;
@@ -941,6 +962,12 @@
   #define SW_PWM_P4                  A2
   #define HWPWM6
   // move servo 3 & 4 to pin 13 & 11
+  #undef SERVO_3_PINMODE
+  #undef SERVO_3_PIN_HIGH
+  #undef SERVO_3_PIN_LOW
+  #undef SERVO_4_PINMODE
+  #undef SERVO_4_PIN_HIGH
+  #undef SERVO_4_PIN_LOW
   #define SERVO_3_PINMODE   DDRC |= (1<<7); // 13
   #define SERVO_3_PIN_HIGH  PORTC |= 1<<7;
   #define SERVO_3_PIN_LOW   PORTC &= ~(1<<7);
@@ -949,6 +976,10 @@
   #define SERVO_4_PIN_LOW   PORTB &= ~(1<<7);
   // use pin 4 as status LED output if we have no octo
   #if !defined(OCTOX8) && !defined(OCTOFLATP) && !defined(OCTOFLATX)
+    #undef LEDPIN_PINMODE
+    #undef LEDPIN_TOGGLE
+    #undef LEDPIN_OFF
+    #undef LEDPIN_ON
     #define LEDPIN_PINMODE             DDRD |= (1<<4);            //D4 to output
     #define LEDPIN_TOGGLE              PIND |= (1<<5)|(1<<4);     //switch LEDPIN state (Port D5) & pin D4
     #define LEDPIN_OFF                 PORTD |= (1<<5); PORTD &= ~(1<<4);
@@ -1378,7 +1409,7 @@
   #undef INTERNAL_I2C_PULLUPS 
 #endif
 
-#if defined(CRIUS_AIO_PRO_V1) 
+#if defined(CRIUS_AIO_PRO) 
   #define MPU6050 
   #define HMC5883 
   #define MS561101BA 
@@ -1635,7 +1666,7 @@
   #define GPS 0
 #endif
 
-#if defined(GPS_SERIAL)
+#if defined(USE_MSP_WP)
   #define NAVCAP 1
 #else
   #define NAVCAP 0
@@ -1932,19 +1963,19 @@
 #endif
 
 #if defined(POWERMETER_SOFT) && !(defined(VBAT))
-        #error "to use powermeter, you must also define and configure VBAT"
+  #error "to use powermeter, you must also define and configure VBAT"
 #endif
 
 #if defined(WATTS) && !(defined(POWERMETER_HARD)) && !(defined(VBAT))
-        #error "to compute WATTS, you must also define and configure both POWERMETER_HARD and VBAT"
+  #error "to compute WATTS, you must also define and configure both POWERMETER_HARD and VBAT"
 #endif
 
 #if defined(LCD_TELEMETRY_AUTO) && !(defined(LCD_TELEMETRY))
-        #error "to use automatic telemetry, you MUST also define and configure LCD_TELEMETRY"
+  #error "to use automatic telemetry, you MUST also define and configure LCD_TELEMETRY"
 #endif
 
 #if defined(LCD_TELEMETRY_STEP) && !(defined(LCD_TELEMETRY))
-        #error "to use single step telemetry, you MUST also define and configure LCD_TELEMETRY"
+  #error "to use single step telemetry, you MUST also define and configure LCD_TELEMETRY"
 #endif
 
 #if defined(A32U4_4_HW_PWM_SERVOS) && !(defined(HELI_120_CCPM))
@@ -1953,6 +1984,14 @@
 
 #if GPS && !defined(NMEA) && !defined(UBLOX) && !defined(MTK_BINARY16) && !defined(MTK_BINARY19) && !defined(INIT_MTK_GPS) && !defined(I2C_GPS)
   #error "when using GPS you must specify the protocol NMEA, UBLOX..."
+#endif
+
+#if defined(NUNCHUK) || \
+    defined( MPU6050_LPF_256HZ) || defined(MPU6050_LPF_188HZ)  || defined( MPU6050_LPF_98HZ) || defined( MPU6050_LPF_42HZ) || \
+    defined( MPU6050_LPF_20HZ)  || defined( MPU6050_LPF_10HZ)  || defined( MPU6050_LPF_5HZ)  || \
+    defined( ITG3200_LPF_256HZ) || defined( ITG3200_LPF_188HZ) || defined( ITG3200_LPF_98HZ) || defined( ITG3200_LPF_42HZ) || \
+    defined( ITG3200_LPF_20HZ)  || defined( ITG3200_LPF_10HZ)
+  #error "you use one feature that is no longer supported or has undergone a name change"
 #endif
 
 #endif /* DEF_H_ */

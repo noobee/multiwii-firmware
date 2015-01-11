@@ -79,6 +79,9 @@
     /* enable internal I2C pull ups (in most cases it is better to use external pullups) */
     //#define INTERNAL_I2C_PULLUPS
 
+  /**********************************  constant loop time  ******************************/
+    #define LOOP_TIME 2800
+
   /**************************************************************************************/
   /*****************          boards and sensor definitions            ******************/
   /**************************************************************************************/
@@ -140,7 +143,7 @@
       //#define Bobs_9DOF_V1     // BobsQuads 9DOF V1 with ITG3200, BMA180 & HMC5883L
       //#define Bobs_10DOF_BMP_V1 // BobsQuads 10DOF V1 with ITG3200, BMA180, HMC5883L & BMP180 - BMP180 is software compatible with BMP085
       //#define FLYDUINO_MPU       // MPU6050 Break Out onboard 3.3V reg
-      //#define CRIUS_AIO_PRO_V1
+      //#define CRIUS_AIO_PRO
       //#define DESQUARED6DOFV2GO  // DEsquared V2 with ITG3200 only
       //#define DESQUARED6DOFV4    // DEsquared V4 with MPU6050
       //#define LADYBIRD
@@ -282,6 +285,10 @@
      */
     //#define GOVERNOR_P 7     // (*) proportional factor. Higher value -> higher throttle increase. Must be >=1; 0 = turn off
     //#define GOVERNOR_D 4     // (*) decay timing. Higher value -> takes longer to return throttle to normal. Must be >=1;
+
+    /* tail precomp from collective */
+    //#define YAW_COLL_PRECOMP 15           // (*) proportional factor in 0.1. Higher value -> higher precomp effect. value of 10 equals no/neutral effect
+    //#define YAW_COLL_PRECOMP_DEADBAND 120 // (*) deadband for collective pitch input signal around 0-pitch input value
 
     //#define VOLTAGEDROP_COMPENSATION // voltage impact correction
 
@@ -495,15 +502,9 @@ At this moment you can use this function only with WinGUI 2.3 release. MultiWiiC
     #define SERIAL2_COM_SPEED 115200
     #define SERIAL3_COM_SPEED 115200
 
-    /* interleaving delay in micro seconds between 2 readings WMP/NK in a WMP+NK config
-       if the ACC calibration time is very long (20 or 30s), try to increase this delay up to 4000
-       it is relevent only for a conf with NK */
-    #define INTERLEAVING_DELAY 3000
-
     /* when there is an error on I2C bus, we neutralize the values during a short time. expressed in microseconds
        it is relevent only for a conf with at least a WMP */
     #define NEUTRALIZE_DELAY 100000
-
 
   /**************************************************************************************/
   /********                              Gyro filters                ********************/
@@ -546,6 +547,10 @@ At this moment you can use this function only with WinGUI 2.3 release. MultiWiiC
 /****************  SECTION  6 - OPTIONAL FEATURES                                          *******/
 /*****************                                                                 ***************/
 /*************************************************************************************************/
+
+  /************************        Reset Baro altitude on arm         ********************/
+  /* When unchecked a calibration of the baro altitude is preformed every time arming is activated */
+  //#define ALTITUDE_RESET_ON_ARM
 
   /************************        Angele throttle correction         ********************/
   /* Automatically increase throttle based on the angle of the copter
@@ -847,15 +852,15 @@ Also note, that maqgnetic declination changes with time, so recheck your value e
 
     /* optional exclude some functionality - uncomment to suppress some unwanted telemetry pages */
     //#define SUPPRESS_TELEMETRY_PAGE_1
-    //#define SUPPRESS_TELEMETRY_PAGE_2
-    //#define SUPPRESS_TELEMETRY_PAGE_3
-    //#define SUPPRESS_TELEMETRY_PAGE_4
-    //#define SUPPRESS_TELEMETRY_PAGE_5
-    //#define SUPPRESS_TELEMETRY_PAGE_6
-    //#define SUPPRESS_TELEMETRY_PAGE_7
-    //#define SUPPRESS_TELEMETRY_PAGE_8
-    //#define SUPPRESS_TELEMETRY_PAGE_9
-    //#define SUPPRESS_TELEMETRY_PAGE_R
+    //#define SUPPRESS_TELEMETRY_PAGE_2 // sensor readings
+    //#define SUPPRESS_TELEMETRY_PAGE_3 // checkboxitems
+    //#define SUPPRESS_TELEMETRY_PAGE_4 // rx inputs
+    //#define SUPPRESS_TELEMETRY_PAGE_5 // servo&motor outputs
+    //#define SUPPRESS_TELEMETRY_PAGE_6 // cells voltages
+    //#define SUPPRESS_TELEMETRY_PAGE_7 // gps
+    //#define SUPPRESS_TELEMETRY_PAGE_8 // alarms states
+    //#define SUPPRESS_TELEMETRY_PAGE_9 // cycle & fails
+    //#define SUPPRESS_TELEMETRY_PAGE_R // reset
 
     /* optional override default items for some telemetry pages - for complete list of usable functions see LCD.h */
     //#define LCD_TELEMETRY_PAGE1 { output_V, output_mAh, }
@@ -892,7 +897,16 @@ Also note, that maqgnetic declination changes with time, so recheck your value e
     #define VBATLEVEL_WARN2  99 // (*) (**) 9.9V
     #define VBATLEVEL_CRIT   93 // (*) (**) 9.3V - critical condition: if vbat ever goes below this value, permanent alarm is triggered
     #define NO_VBAT          16 // Avoid beeping without any battery
+    #define VBAT_OFFSET       0 // offset in 0.1Volts, gets added to voltage value  - useful for zener diodes
 
+    /* for V BAT monitoring of individual cells
+     * enable both VBAT and VBAT_CELLS
+     */
+    //#define VBAT_CELLS
+    #define VBAT_CELLS_NUM 0 // set this to the number of cells you monitor via analog pins
+    #define VBAT_CELLS_PINS {A0, A1, A2, A3, A4, A5 } // set this to the sequence of analog pins
+    #define VBAT_CELLS_OFFSETS {0, 50, 83, 121, 149, 177 } // in 0.1 volts, gets added to voltage value  - useful for zener diodes
+    #define VBAT_CELLS_DIVS { 75, 122,  98, 18, 30, 37 } // divisor for proportional part according to resistors - larger value here gives smaller voltage
 
   /********************************************************************/
   /****           powermeter (battery capacity monitoring)         ****/
